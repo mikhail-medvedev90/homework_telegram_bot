@@ -1,7 +1,7 @@
 import logging
 import os
 import time
-from typing import Never, NoReturn
+from typing import NoReturn
 
 import requests
 import telegram
@@ -127,7 +127,7 @@ def parse_status(homework: dict) -> str:
             f'{HOMEWORK_VERDICTS[status]}')
 
 
-def main() -> Never:
+def main():
     """
     Main logic of program.
     1. Send API request;
