@@ -1,7 +1,6 @@
 import logging
 import os
 import time
-from typing import NoReturn
 
 import requests
 import telegram
@@ -32,7 +31,7 @@ HOMEWORK_VERDICTS = {
 }
 
 
-def check_tokens() -> None | NoReturn:
+def check_tokens():
     """Check is needed variables is not empty, raise exception otherwise."""
     raise_message = ''
     if not PRACTICUM_TOKEN:
@@ -48,7 +47,7 @@ def check_tokens() -> None | NoReturn:
         logging.info('All tokens upload')
 
 
-def send_message(bot: telegram.Bot, message: str) -> None:
+def send_message(bot: telegram.Bot, message: str):
     """
     Send message to Telegram chat via telegram.Bot instance.
     :param: bot - bot object to send message.
@@ -58,7 +57,7 @@ def send_message(bot: telegram.Bot, message: str) -> None:
     logging.debug('Message sent successfully')
 
 
-def get_api_answer(timestamp: int) -> dict:
+def get_api_answer(timestamp: int):
     """
     Function sends GET request to Yandex Practicum API.
     And waiting until response.
@@ -87,7 +86,7 @@ def get_api_answer(timestamp: int) -> dict:
             raise WrongResponseStatusCode(error_msg)
 
 
-def check_response(response: dict) -> list[dict] | NoReturn:
+def check_response(response: dict):
     """
     Check keys (`homeworks`, `current_date`) in response.
     Return `homeworks` key`s value, raise ResponseKeyNotFound otherwise.
@@ -107,7 +106,7 @@ def check_response(response: dict) -> list[dict] | NoReturn:
         raise TypeError(msg)
 
 
-def parse_status(homework: dict) -> str:
+def parse_status(homework: dict):
     """
     Extract status from homework data.
     :param: homework - dict with all homework`s data.
