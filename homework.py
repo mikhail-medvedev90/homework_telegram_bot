@@ -1,10 +1,11 @@
 import logging
 import os
+import sys
 import time
+from http import HTTPStatus
 
 import requests
 import telegram
-
 from dotenv import load_dotenv
 
 from exceptions import TokenNotFound, WrongResponseStatusCode
@@ -12,9 +13,6 @@ from exceptions import TokenNotFound, WrongResponseStatusCode
 
 load_dotenv()
 
-logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    level=logging.INFO)
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
@@ -22,7 +20,6 @@ ENDPOINT = os.getenv('ENDPOINT')
 
 RETRY_PERIOD = 600
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
-
 
 HOMEWORK_VERDICTS = {
     'approved': 'Работа проверена: ревьюеру всё понравилось. Ура!',
@@ -33,18 +30,14 @@ HOMEWORK_VERDICTS = {
 
 def check_tokens():
     """Check is needed variables is not empty, raise exception otherwise."""
-    raise_message = ''
-    if not PRACTICUM_TOKEN:
-        raise_message = 'PRACTICUM_TOKEN not found'
-    if not TELEGRAM_TOKEN:
-        raise_message = 'TELEGRAM_TOKEN not found'
-    if not TELEGRAM_CHAT_ID:
-        raise_message = 'TELEGRAM_CHAT_ID not found'
-    if raise_message:
-        logging.critical(raise_message)
-        raise TokenNotFound(raise_message)
-    else:
-        logging.info('All tokens upload')
+    source = "PRACTICUM_TOKEN", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"
+    not_found_tokens = [token for token in source if not globals()[token]]
+
+    if not_found_tokens:
+        critical_msg = f"Tokens: {', '.join(not_found_tokens)} not found."
+        logging.critical(critical_msg)
+        raise TokenNotFound(critical_msg)
+    logging.info('All tokens upload')
 
 
 def send_message(bot: telegram.Bot, message: str):
@@ -53,8 +46,14 @@ def send_message(bot: telegram.Bot, message: str):
     :param: bot - bot object to send message.
     :param: message - text to send.
     """
-    bot.send_message(TELEGRAM_CHAT_ID, message)
-    logging.debug('Message sent successfully')
+    try:
+        logging.info(f"Start sending message to telegram: {TELEGRAM_CHAT_ID}")
+        bot.send_message(TELEGRAM_CHAT_ID, message)
+        logging.debug('Message sent successfully')
+    except telegram.TelegramError as error:
+        logging.error(
+            f'Error happens while sending message to telegram: {error}'
+        )
 
 
 def get_api_answer(timestamp: int):
@@ -66,24 +65,27 @@ def get_api_answer(timestamp: int):
     :return: list of homeworks.
     """
     try:
+        logging.info(
+            f'Start sending request to API: {ENDPOINT}, '
+            f'headers={HEADERS}, params={{"from_date": {timestamp}}}'
+        )
         response: requests.Response = requests.get(
             ENDPOINT,
             headers=HEADERS,
             params={'from_date': timestamp}
         )
-    except Exception as error:
-        logging.error(f'Error happens while sending the request. '
-                      f'It says: {error}')
-        return {}
-    else:
-        if response.status_code == 200:
-            logging.info('Response answer is OK')
-            return response.json()
-        else:
-            error_msg = (f'Endpoint is not available. '
-                         f'Status code is {response.status_code}')
-            logging.error(error_msg)
-            raise WrongResponseStatusCode(error_msg)
+        logging.debug('Response sent is OK')
+    except requests.RequestException as error:
+        raise ConnectionError(
+            'Error happens while sending the request. '
+            f'It says: {error}'
+        )
+    if response.status_code != HTTPStatus.OK:
+        raise WrongResponseStatusCode(
+            'Endpoint is not available. '
+            f'Status code is {response.reason}'
+        )
+    return response.json()
 
 
 def check_response(response: dict):
@@ -93,36 +95,39 @@ def check_response(response: dict):
     :param: response - dict with two keys or fewer.
     :return: list homeworks.
     """
-    if (isinstance(response, dict)
-            and 'homeworks' in response
-            and 'current_date' in response):
-        logging.debug('Both keys are in response')
-        if isinstance(response['homeworks'], list):
-            return response['homeworks']
+    logging.info('Start checking the server response')
+    if not isinstance(response, dict):
+        raise TypeError('Server response is not dict instance')
+    if 'homeworks' not in response:
+        raise TypeError('There are no key "homeworks" in API response')
+    if 'current_date' not in response:
+        raise TypeError('There are no key "current_date" in API response')
+    logging.debug('Both keys are in response')
+    if not isinstance(response['homeworks'], list):
         raise TypeError('Value of homeworks key is not list instance')
-    else:
-        msg = 'There are no keys in API response'
-        logging.error(msg)
-        raise TypeError(msg)
+    return response['homeworks']
 
 
-def parse_status(homework: dict):
+def parse_status(homeworks: dict):
     """
     Extract status from homework data.
     :param: homework - dict with all homework`s data.
     :return: str with verdict from HOMEWORK_VERDICTS
     prepared to send in telegram.
     """
-    try:
-        homework_name = homework['homework_name']
-        status = homework['status']
-    except KeyError:
+    logging.info('Start checking status is homework')
+    if 'homework_name' not in homeworks:
         raise KeyError('Key `homework_name` is not found')
-    if status not in HOMEWORK_VERDICTS.keys():
-        raise KeyError(
-            f'Status: {status} is not in {HOMEWORK_VERDICTS.keys()}'
+    if 'status' not in homeworks:
+        raise KeyError('Key `status` is not found')
+    status = homeworks['status']
+    homeworks_name = homeworks['homework_name']
+    if status not in HOMEWORK_VERDICTS:
+        raise ValueError(
+            f'Status: {status} is not in {HOMEWORK_VERDICTS}.'
         )
-    return (f'Изменился статус проверки работы "{homework_name}". '
+    logging.debug('Status check was successful in response')
+    return (f'Изменился статус проверки работы "{homeworks_name}". '
             f'{HOMEWORK_VERDICTS[status]}')
 
 
@@ -137,26 +142,38 @@ def main():
     check_tokens()
 
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
+    timestamp = int(time.time())
+    old_message = ''
 
     while True:
-        timestamp = int(time.time())
         try:
             response = get_api_answer(timestamp)
             homeworks = check_response(response)
-            for homework in homeworks:
-                message = parse_status(homework)
+            if homeworks:
+                message = parse_status(homeworks[0])
                 send_message(bot, message)
-            logging.info(
-                f'Got {len(homeworks)} homeworks. '
-                f'Sleep {RETRY_PERIOD} seconds.'
-            )
+                logging.info(
+                    f'Got {len(homeworks)} homeworks. '
+                    f'Sleep {RETRY_PERIOD} seconds.'
+                )
+            else:
+                logging.debug('No new statuses in response')
+            timestamp = int(time.time())
 
         except Exception as error:
             message = f'Error occurred while loop working: {error}'
-            logging.error(message)
+            logging.error(message, exc_info=True)
+            if message != old_message:
+                send_message(bot, message)
+                old_message = message
 
         time.sleep(RETRY_PERIOD)
 
 
 if __name__ == '__main__':
+    logging.basicConfig(
+        format='%(asctime)s - %(lineno)d - %(levelname)s - %(message)s',
+        level=logging.INFO,
+        handlers=[logging.StreamHandler(stream=sys.stdout)]
+    )
     main()

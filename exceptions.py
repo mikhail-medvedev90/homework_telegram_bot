@@ -1,8 +1,8 @@
-class TokenNotFound(FileNotFoundError):
+class TokenNotFound(Exception):
     pass
 
 
-class ResponseKeyNotFound(KeyError):
+class ResponseKeyNotFound(Exception):
     pass
 
 
