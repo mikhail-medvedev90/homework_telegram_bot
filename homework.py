@@ -30,8 +30,8 @@ HOMEWORK_VERDICTS = {
 
 def check_tokens():
     """Check is needed variables is not empty, raise exception otherwise."""
-    source = "PRACTICUM_TOKEN", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"
-    not_found_tokens = [token for token in source if not globals()[token]]
+    SOURCE = "PRACTICUM_TOKEN", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"
+    not_found_tokens = [token for token in SOURCE if not globals()[token]]
 
     if not_found_tokens:
         critical_msg = f"Tokens: {', '.join(not_found_tokens)} not found."
@@ -46,14 +46,15 @@ def send_message(bot: telegram.Bot, message: str):
     :param: bot - bot object to send message.
     :param: message - text to send.
     """
+    logging.info(f"Start sending message to telegram: {TELEGRAM_CHAT_ID}")
     try:
-        logging.info(f"Start sending message to telegram: {TELEGRAM_CHAT_ID}")
         bot.send_message(TELEGRAM_CHAT_ID, message)
-        logging.debug('Message sent successfully')
     except telegram.TelegramError as error:
         logging.error(
             f'Error happens while sending message to telegram: {error}'
         )
+    else:
+        logging.debug('Message sent successfully')
 
 
 def get_api_answer(timestamp: int):
@@ -64,26 +65,27 @@ def get_api_answer(timestamp: int):
     :param: timestamp - required parameter for get request.
     :return: list of homeworks.
     """
+    logging.info(
+        f'Start sending request to API: {ENDPOINT}, '
+        f'headers={HEADERS}, params={{"from_date": {timestamp}}}'
+    )
     try:
-        logging.info(
-            f'Start sending request to API: {ENDPOINT}, '
-            f'headers={HEADERS}, params={{"from_date": {timestamp}}}'
-        )
         response: requests.Response = requests.get(
             ENDPOINT,
             headers=HEADERS,
             params={'from_date': timestamp}
         )
-        logging.debug('Response sent is OK')
     except requests.RequestException as error:
         raise ConnectionError(
             'Error happens while sending the request. '
             f'It says: {error}'
         )
+    else:
+        logging.debug('Response sent is OK')
     if response.status_code != HTTPStatus.OK:
         raise WrongResponseStatusCode(
             'Endpoint is not available. '
-            f'Status code is {response.reason}'
+            f'Status code: {response.status_code} is {response.reason}'
         )
     return response.json()
 
@@ -97,14 +99,19 @@ def check_response(response: dict):
     """
     logging.info('Start checking the server response')
     if not isinstance(response, dict):
-        raise TypeError('Server response is not dict instance')
+        raise TypeError(
+            f'Type server response: {type(response)} is not dict instance'
+        )
     if 'homeworks' not in response:
-        raise TypeError('There are no key "homeworks" in API response')
+        raise TypeError('There are no key `homeworks` in API response')
     if 'current_date' not in response:
-        raise TypeError('There are no key "current_date" in API response')
+        raise TypeError('There are no key `current_date` in API response')
     logging.debug('Both keys are in response')
     if not isinstance(response['homeworks'], list):
-        raise TypeError('Value of homeworks key is not list instance')
+        raise TypeError(
+            f"Type value of homeworks key: "
+            f"{type(response['homeworks'])} is not list instance"
+        )
     return response['homeworks']
 
 
@@ -152,8 +159,9 @@ def main():
             if homeworks:
                 message = parse_status(homeworks[0])
                 send_message(bot, message)
+                old_message = message
                 logging.info(
-                    f'Got {len(homeworks)} homeworks. '
+                    f'Got homework. '
                     f'Sleep {RETRY_PERIOD} seconds.'
                 )
             else:
@@ -166,8 +174,8 @@ def main():
             if message != old_message:
                 send_message(bot, message)
                 old_message = message
-
-        time.sleep(RETRY_PERIOD)
+        finally:
+            time.sleep(RETRY_PERIOD)
 
 
 if __name__ == '__main__':
